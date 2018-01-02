@@ -1,0 +1,137 @@
+#! /usr/bin/env python
+#-*- coding:utf-8 -*-
+
+import time,datetime
+import urllib
+import smtplib
+import string
+import sys
+import logging.handlers
+
+from aliyunsdkcore.client import AcsClient
+from aliyunsdkcore.acs_exception.exceptions import ClientException
+from aliyunsdkcore.acs_exception.exceptions import ServerException
+from aliyunsdkrds.request.v20140815 import DescribeBackupsRequest
+from aliyunsdkrds.request.v20140815 import DescribeBackupTasksRequest
+
+from email.mime.text import MIMEText 
+
+startTime = "2017-11-20T00:00Z"
+subject = "Message about download RDS"
+mail_to = ""
+p1_DBInstanceId = ""
+p2_DBInstanceId = ""
+downloadPostion1 = ""
+downloadPostion2 = ""
+week = 2
+hour = 23
+minute = 0
+typeUrl = 0
+
+LOG_FILENAME = "vehicle_count_log.log"
+my_logger = logging.getLogger("MyLogger")
+my_logger.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(filename)s - [line:%(lineno)d] - %(levelname)s - %(message)s')
+handler = logging.handlers.RotatingFileHandler(LOG_FILENAME, maxBytes = 1024*1024, backupCount = 10)
+handler.setFormatter(formatter)
+my_logger.addHandler(handler)
+
+def SendMail(mail_to, subject, msg):
+	try:
+		msg_fmt = MIMEText(msg, _subtype='plain', _charset='utf-8')
+		msg_fmt['From'] = 'dd_ops@163.com'
+		msg_fmt['Subject'] = subject
+		mailto = string.split(mail_to, ',')
+		msg_fmt['To'] = ','.join(mailto)
+
+		s = smtplib.SMTP_SSL('smtp.163.com', 465)
+		s.login('dd_ops@163.com', 'DiDiMorAlm123')
+		s.sendmail(msg_fmt['From'], mailto, msg_fmt.as_string())
+		s.close()
+		
+		my_logger.info("Send Email Success!")
+
+	except Exception, ex:
+		send_mail_err(mail_to, subject, msg)
+
+def send_mail_err(mail_to, subject, msg):
+	subject = '由备用邮箱发送' + subject
+	msg_fmt = MIMEText(msg, _subtype='plain', _charset='utf-8')
+	msg_fmt['From'] = 'dd_ops_01@163.com'
+	msg_fmt['Subject'] = subject
+	mailto = string.split(mail_to, ',')
+	msg_fmt['To'] = ','.join(mailto)
+
+	s = smtplib.SMTP_SSL('smtp.163.com', 465)
+	s.login('dd_ops_01@163.com', 'DiDiMorAlm123')
+	s.sendmail(msg_fmt['From'], mailto, msg_fmt.as_string())
+	s.close()
+	
+	my_logger.info("Send Email Successfully! Using Spare mail")
+
+def getDownloadUrl(startTime, endTime, inter, DBInstanceId):
+	client = AcsClient(
+	);
+
+	request = DescribeBackupsRequest.DescribeBackupsRequest()
+	request.set_DBInstanceId(DBInstanceId)
+	request.set_StartTime(startTime)
+	request.set_EndTime(endTime)
+
+	response = client.do_action_with_exception(request)
+	
+	if inter == 1:
+		my_logging.info("Successfully get BackupIntranetDownloadURL!")
+		return(response.split('"BackupIntranetDownloadURL":"')[1].split('"')[0])
+	my_logging.info("Successfully get BackupDownloadURL!")
+	return(response.split('"BackupDownloadURL":"')[1].split('"')[0])
+
+def Scheduled(a, b, c):
+    """
+    a:已经下载的数据块
+    b:数据库块的大小
+    c:远程文件的大小
+    """
+    per = 100.0 * a * b / c
+    if per > 100:
+        per = 100
+        print("下载完成！")
+    print("%.2f%%" % per)
+
+def DownloadFile(downloadUrl, downloadPosition):
+	if downloadUrl == "NULL":
+		text = "The download url is NULL!"
+		my_logging.info("The download url is NULL!")
+		SendMail(mail_to, subject, text)
+	position = downloadPosition + downloadUrl.split("/")[-1].split("?")[0]
+	try:
+		urllib.urlretrieve(downloadUrl, position, Scheduled)
+		text = "Download Success!"
+		my_logging.info("Download Success!")
+		SendMail(mail_to, subject, text)
+	except Exception as err:
+		text = "Download Failed!"
+		my_logging.error(text)
+		SendMail(mail_to, subject, text)
+
+"""
+startTime: string 搜索的开始时间
+w:int 定时的星期数，w=1，表示星期一
+h:int 定时的小时，24小时制
+m:int 定时的分钟
+urlType:int 外网内网链接选择，0表示外网链接，1表示内网链接
+"""
+def ScheduledTask(startTime, w, h, m, urlType):
+	while True:
+		now = datetime.datetime.now()
+		if now.weekday() == w and now.hour == h and now.minute == m:
+			endTime = datetime.datetime.now().strftime("%Y-%m-%dT%H:%MZ")
+			#p1
+			downloadUrl = getDownloadUrl(startTime, endTime, urlType, p1_DBInstanceId)
+			DownloadFile(downloadUrl, downloadPosition1)
+			#p2
+			downloadUrl = getDownloadUrl(startTime, endTime, urlType, p2_DBInstanceId)
+			DownloadFile(downloadUrl, downloadPosition2)
+
+if __name__ == "__main__":
+	ScheduledTask(startTime, week, hour, minute, typeUrl)
