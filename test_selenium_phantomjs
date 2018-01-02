@@ -1,0 +1,79 @@
+#-*- coding:utf-8 -*-
+
+import os
+import time,datetime
+from selenium import webdriver
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
+
+def writeToZento(slowLogs):
+    #try:
+        path = "./phantomjs"
+        driver = webdriver.PhantomJS(executable_path=path)
+        driver.set_window_size(1920, 1080)
+        driver.get("http://192.168.1.37:8899/zentao/user-login-L3plbnRhby8=.html")
+
+
+        #登陆
+        elem1 = driver.find_element_by_name("account")
+        elem1.clear()
+        elem1.send_keys(username)
+        elem2 = driver.find_element_by_name("password")
+        elem2.clear()
+        elem2.send_keys(password)
+        #进入17年11月运维中的提Bug界面
+        driver.find_element_by_id("submit").click()
+        driver.find_element_by_link_text("项目").click()
+        driver.find_element_by_id("searchQuery").send_keys('123')
+        driver.find_element_by_id("objectSwitcher").click()
+        try:
+            locator = (By.LINK_TEXT, "Bug")
+            WebDriverWait(driver, 100, 0.5).until(EC.presence_of_element_located(locator))
+        finally:
+            driver.find_element_by_link_text("Bug").click()
+
+        locator = (By.LINK_TEXT, "提Bug")
+        WebDriverWait(driver, 100, 0.5).until(EC.presence_of_element_located(locator))
+        driver.find_element_by_link_text("提Bug").click()
+
+        #提bug界面
+        #driver.find_element_by_class_name("chosen-single").send_keys("/基础架构")
+        locator = (By.CLASS_NAME, "chosen-choices")
+        WebDriverWait(driver, 100, 0.5).until(driver.find_element_by_class_name("chosen-choices").is_displayed())
+        #影响版本，不稳定，有bug
+        driver.find_element_by_class_name("chosen-choices").click()
+        driver.find_element_by_class_name("highlighted").click()
+        #指派
+        driver.find_element_by_id("assignedToBox")\
+            .find_element_by_class_name('chosen-single').click()
+        driver.find_element_by_id("assignedToBox")\
+            .find_element_by_class_name("chosen-drop")\
+            .find_element_by_class_name("chosen-search")\
+            .find_element_by_css_selector("input[autocomplete='off']").send_keys(username)
+        driver.find_element_by_id("assignedToBox")\
+            .find_element_by_class_name("chosen-drop")\
+            .find_element_by_class_name("active-result").click()
+        #截至日期
+        driver.find_element_by_name("deadline").send_keys((datetime.datetime.now() + datetime.timedelta(days=7)).strftime("%Y-%m-%d"))
+        #Bug标题
+        driver.find_element_by_name("title").send_keys("RDS慢日志")
+        #因为重现步骤框放在一个iframe中，所以要切换到iframe中，结束后将焦点切换回去
+        driver.switch_to_frame(driver.find_element_by_tag_name("iframe"))
+        driver.find_element_by_class_name("article-content").send_keys("52463454343434143241541545414")
+        driver.switch_to_default_content()
+        #保存
+        driver.find_element_by_id("submit").click()
+
+        assert "禅道" in driver.title
+        driver.close()
+
+    except Exception as e:
+        print(e)
+        driver.close()
+        #writeToZento(slowLogs)
+
+if __name__ == "__main__":
+    writeToZento("4654154")
+
