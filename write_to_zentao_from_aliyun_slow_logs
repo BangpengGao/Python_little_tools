@@ -1,0 +1,257 @@
+#-*- coding:utf-8 -*-
+
+import json
+import numpy as np
+import time,datetime
+import sys
+import logging.handlers
+
+from selenium import webdriver
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.select import Select
+from aliyunsdkcore.client import AcsClient
+from aliyunsdkcore.acs_exception.exceptions import ClientException
+from aliyunsdkcore.acs_exception.exceptions import ServerException
+from aliyunsdkrds.request.v20140815 import DescribeSlowLogsRequest
+from aliyunsdkrds.request.v20140815 import DescribeSlowLogRecordsRequest
+
+none = []
+p1_DBInstanceId = ""
+p2_DBInstanceId = ""
+
+def readSetUp():
+    #读取每个addresshost对应的人
+    f = open("assignedTo.txt")
+    assignedTos = {}
+    for line in f:
+        assignedTos[line.split("\n")[0].split(" ")[1]] = line.split(" ")[0].decode("UTF-8")
+    f.close()
+    return assignedTos
+
+def log_():
+    LOG_FILENAME = "vehicle_count_log.log"
+    my_logger = logging.getLogger("MyLogger")
+    my_logger.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(filename)s - [line:%(lineno)d] - %(levelname)s - %(message)s')
+    handler = logging.handlers.RotatingFileHandler(LOG_FILENAME, maxBytes = 1024*1024, backupCount = 10)
+    handler.setFormatter(formatter)
+    my_logger.addHandler(handler)
+    return my_logger
+
+def getSlowLogs(startTime, endTime, DBInstanceId, p):
+    client = AcsClient(
+    );
+
+    request = DescribeSlowLogsRequest.DescribeSlowLogsRequest()
+    request.set_DBInstanceId(DBInstanceId)
+    request.set_StartTime(startTime)
+    request.set_EndTime(endTime)
+    request.set_PageSize(100)
+    #获取总的数量
+    if p == "page":
+        response = client.do_action_with_exception(request)
+        #json String to dict
+        response = json.loads(response)
+        return(response["TotalRecordCount"])
+    #分页，提取特定页
+    request.set_PageNumber(p)
+    response = client.do_action_with_exception(request)
+    #json String to dict
+    response = json.loads(response)
+    return response["Items"]["SQLSlowLog"]
+
+def getSlowLogsRecords(startTime, endTime, DBInstanceId, p):
+    client = AcsClient(
+    );
+
+    request = DescribeSlowLogRecordsRequest.DescribeSlowLogRecordsRequest()
+    request.set_DBInstanceId(DBInstanceId)
+    request.set_StartTime(startTime)
+    request.set_EndTime(endTime)
+    request.set_PageSize(100)
+    #获取总的数量
+    if p == "page":
+        response = client.do_action_with_exception(request)
+        response = json.loads(response)
+        return(response["TotalRecordCount"])
+    #分页，提取特定页
+    request.set_PageNumber(p)
+    response = client.do_action_with_exception(request)
+    response = json.loads(response)
+    return(response["Items"]["SQLSlowRecord"])
+
+def extractFigures1(strings):
+    strings = strings.split(" :1")[0]
+    return strings.lower().replace("\n","").replace(" ", "").replace("\t", '').replace('\"', '"')
+
+def extractFigures2(strings):
+    strings = strings.lower().replace("\n","").replace(" ", "").replace("\t", '').replace('\"', '"').replace("\r", "")
+    return strings.split("'")[0]
+
+def macthSlowLogs(strings, listStrings):
+    result = []
+    for i in range(len(listStrings)):
+        if strings == listStrings[i][1] or strings in listStrings[i][1] or listStrings[i][1] in strings:
+            if len(strings) > 8 and strings[:8] == listStrings[i][1][:8]:
+                result.append(listStrings[i][0])
+                continue
+            result.append(listStrings[i][0])
+    func = lambda x,y: x if y in x else x + [y]
+    return reduce(func, [[], ] + result)
+
+def writeToZento(assignedTo, slowLogs):
+    try:
+        path = "chromedriver.exe"
+        driver = webdriver.Chrome(path)
+        driver.get("http://192.168.1.37:8899/zentao/user-login-L3plbnRhby8=.html")
+
+        #登陆
+        elem1 = driver.find_element_by_name("account")
+        elem1.clear()
+        elem1.send_keys(username)
+        elem2 = driver.find_element_by_name("password")
+        elem2.clear()
+        elem2.send_keys(password)
+        #进入17年11月运维中的提Bug界面
+        driver.find_element_by_id("submit").click()
+        time.sleep(1)
+        driver.find_element_by_link_text(u"项目").click()
+        driver.find_element_by_name("searchQuery").send_keys("127")
+        driver.find_element_by_id("objectSwitcher").click()
+        time.sleep(1)
+        driver.find_element_by_link_text(u"任务").click()
+        time.sleep(1)
+        driver.find_element_by_link_text(u"建任务").click()
+
+        #提bug界面
+        #driver.find_element_by_class_name("chosen-single").send_keys("/基础架构")
+        #影响版本，不稳定，有bug
+        time.sleep(3)
+        Select(driver.find_element_by_xpath('//select[@id="type"]')).select_by_value("test")
+        #指派
+        assigned = driver.find_element_by_xpath('//div[@class="chosen-container chosen-container-single"]')
+        assigned .find_element_by_class_name('chosen-single').click()
+        assigned.find_element_by_class_name("chosen-drop")\
+            .find_element_by_class_name("chosen-search")\
+            .find_element_by_css_selector("input[autocomplete='off']").send_keys(assignedTo)
+        assigned.find_element_by_class_name("chosen-drop")\
+            .find_element_by_class_name("highlighted").click()
+        #截至日期
+        #driver.find_element_by_name("deadline").send_keys((datetime.datetime.now() + datetime.timedelta(days=7)).strftime("%Y-%m-%d"))
+        #Bug标题
+        driver.find_element_by_id("name").send_keys(u"RDS慢日志—测试")
+        #因为重现步骤框放在一个iframe中，所以要切换到iframe中，结束后将焦点切换回去
+        driver.switch_to.frame(driver.find_element_by_tag_name("iframe"))
+        for key in slowLogs.keys():
+            driver.find_element_by_class_name("article-content").send_keys(key + ":" + str(slowLogs[key]).encode("utf-8") + "\n")
+        driver.switch_to.default_content()
+        #保存
+        driver.find_element_by_id("submit").click()
+
+        time.sleep(3)
+        print u"操作成功！"
+        driver.quit()
+        return True
+
+    except Exception as e:
+        print e
+        driver.quit()
+        return False
+
+def addAddressHostForSlowLogs(startTime, endTime, startRTime, endRTime):
+    #获取总的slowLogs个数
+    slowLogsNumber = getSlowLogs(startTime, endTime, p1_DBInstanceId, "page")
+    print "slowLogsNumber:", slowLogsNumber
+    #分页处理
+    allSlowLogs = []
+    numberSize = slowLogsNumber / 100 + 1 if slowLogsNumber % 100 == 0 else slowLogsNumber / 100 + 2
+    for p in range(1, numberSize):
+        allSlowLogs.extend(getSlowLogs(startTime, endTime, p1_DBInstanceId, p))
+    print "get all slow logs!"
+    print len(allSlowLogs)
+
+    #获取总的records个数
+    recordsNumber = getSlowLogsRecords(startRTime, endRTime, p1_DBInstanceId, "page")
+    print "recordsNumber:", recordsNumber
+    #分页处理
+    allRecords = []
+    numberSize = recordsNumber / 100 + 1 if recordsNumber % 100 == 0 else recordsNumber / 100 + 2
+    for p in range(1, numberSize):
+        allRecords.extend(getSlowLogsRecords(startRTime, endRTime, p1_DBInstanceId, p))
+    print "get all records!"
+    print len(allRecords)
+
+    #对slowLogs中的SQL语句做处理，并去重
+    slowLogsSQL = []
+    for i in range(len(allSlowLogs)):
+        slowLogsSQL.append([allSlowLogs[i]["SQLText"], extractFigures1(allSlowLogs[i]["SQLText"]), i])
+    newSlowLogsSQL = []
+    for i in range(len(slowLogsSQL)):
+        if len(newSlowLogsSQL) == 0:
+            newSlowLogsSQL.append(slowLogsSQL[i])
+        for j in range(len(newSlowLogsSQL)):
+            if slowLogsSQL[i][0] == newSlowLogsSQL[j][0]:
+                break
+        if j == len(newSlowLogsSQL) - 1:
+            newSlowLogsSQL.append(slowLogsSQL[i])
+    print "the number of sorted slow logs SQL", len(newSlowLogsSQL)
+
+    '''
+    f = open("newSlowLogsSQL.txt", "w")
+    for i in range(len(newSlowLogsSQL)):
+        f.write(newSlowLogsSQL[i][0].encode("utf-8") + '\n' + newSlowLogsSQL[i][1].encode("utf-8") + '\n')
+    f.close()
+    '''
+    #对records中的SQL语句做处理，并根据AddressHost和SQL语句去重
+    recordsSQL = []
+    for i in range(len(allRecords)):
+        recordsSQL.append([allRecords[i]["HostAddress"], extractFigures2(allRecords[i]["SQLText"])])
+    func = lambda x,y: x if y in x else x + [y]
+    recordsSQL = reduce(func, [[], ] + recordsSQL)
+    print "the number of sorted records SQL:", len(recordsSQL)
+
+    '''
+    f = open("allRecords.txt", "w")
+    for i in range(len(recordsSQL)):
+        f.write(recordsSQL[i][0] + '\n' + recordsSQL[i][1] + '\n')
+    f.close()
+    '''
+    #匹配slowLogs和records中的SQL语句
+    for i in range(len(newSlowLogsSQL)):
+        macth = macthSlowLogs(newSlowLogsSQL[i][1], recordsSQL)
+        if macth == none:
+            print i
+        allSlowLogs[newSlowLogsSQL[i][2]]["AddressHost"] = macth
+    return allSlowLogs
+
+if __name__ == "__main__":
+    now = datetime.datetime.now()
+    if now.weekday() == 1:
+        startTime = (now - datetime.timedelta(days = 7)).strftime("%Y-%m-%dZ")
+        endTime = now.strftime("%Y-%m-%dZ")
+        startRTime = (now - datetime.timedelta(days = 7)).strftime("%Y-%m-%dT%H:%MZ")
+        endRTime = now.strftime("%Y-%m-%dT%H:%MZ")
+        
+        assignedTos = readSetUp()
+        my_logger = log_()
+        try:#可能出现超时
+            allSlowLogs = addAddressHostForSlowLogs(startTime, endTime, startRTime, endRTime)
+        except Exception as e:
+            print e
+            allSlowLogs = addAddressHostForSlowLogs(startTime, endTime, startRTime, endRTime)
+        for i in range(len(allSlowLogs)):
+            if "AddressHost" in allSlowLogs[i].keys() and allSlowLogs[i]["AddressHost"] != none and allSlowLogs[i]["MySQLTotalExecutionTimes"] >= 60:
+                for j in range(len(allSlowLogs[i]["AddressHost"])):
+                    assignedTo = allSlowLogs[i]["AddressHost"][j]
+                    count = 0
+                    while True:
+                        if writeToZento(assignedTos[assignedTo.split("[")[1].split("]")[0]], allSlowLogs[i]):
+                            time.sleep(3)
+                            break
+                        count = count + 1
+                        time.sleep(3)
+                        if count == 3:
+                            my_logger.error(str(allSlowLogs[i]) + "\n")
+                            my_logger.error("----------------------------------------------------")
+                            break
+
