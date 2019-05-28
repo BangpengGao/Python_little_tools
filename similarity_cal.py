@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # @Author: Phill
 # @Date:   2019-04-25 09:43:35
-# @Last Modified by:   Phill
-# @Last Modified time: 2019-04-25 11:28:40
+# @Last Modified by:   Bangpeng Gao
+# @Last Modified time: 2019-05-28 10:49:36
 
 import numpy as np
 
@@ -16,7 +16,11 @@ def cos_similarity(x, y):
 
 
 def pearson_similarity(x, y):
-    return x
+    x_mean = np.mean(x)
+    y_mean = np.mean(y)
+    x_ = x-x_mean
+    y_ = y-y_mean
+    return (np.sum((x_)*(y_)))/(np.sqrt(np.sum(pow(x_,2)))*np.sqrt(np.sum(pow(y_,2))))
 
 
 if __name__ == '__main__':
@@ -24,3 +28,4 @@ if __name__ == '__main__':
     y = np.array([1,2,3,4,5,6])
     print(euclidean_distance(x, y))
     print(cos_similarity(x, y))
+    print(pearson_similarity(x,y))
