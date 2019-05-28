@@ -2,7 +2,7 @@
 # @Author: Phill
 # @Date:   2019-03-13 11:02:33
 # @Last Modified by:   Phill
-# @Last Modified time: 2019-03-14 09:11:09
+# @Last Modified time: 2019-05-28 10:37:18
 
 import numpy as np
 import cx_Oracle as oracle
@@ -59,14 +59,6 @@ def close(db,cursor):
     cursor.close()
     db.close()
 
-def main():
-    userName = "system"
-    passWord = "manger"
-    dataBaseIp = "192.168.0.185"
-    dataBasePort = '1521'
-    serviceName = "orcl"
-    db,cursor = connectOracle(userName,passWord,dataBaseIp,serviceName,dataBasePort)
-    print(selectOracle(cursor,"SELECT * from HELP WHERE 1=1"))
 
-if __name__ == '__main__':
-    main()
+
+
